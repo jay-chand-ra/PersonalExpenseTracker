@@ -3,10 +3,11 @@ info:
   title: Personal Finance Tracker API
   version: 1.0.0
   description: API for managing personal financial records, including income and expenses.
-
 servers:
+  - url: https://jay-chand-ra.github.io
+    description: Production server
   - url: http://localhost:3001
-
+    description: Local development server
 components:
   securitySchemes:
     BearerAuth:

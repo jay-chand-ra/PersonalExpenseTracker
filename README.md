@@ -12,8 +12,8 @@ This is a RESTful API for managing personal financial records. Users can record 
 ## Setup and Run Instructions
 
 1. Clone the repository:   ```
-   git clone https://github.com/yourusername/personal-finance-api.git
-   cd personal-finance-api   ```
+   git clone https://github.com/jay-chand-ra/PersonalExpenseTracker.git
+   cd PersonalExpenseTracker   ```
 
 2. Install dependencies:   ```
    npm install   ```
