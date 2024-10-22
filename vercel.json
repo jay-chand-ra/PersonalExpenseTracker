@@ -11,5 +11,9 @@
       "src": "/(.*)",
       "dest": "/app.js"
     }
-  ]
+  ],
+  "env": {
+    "MONGODB_URI": "@mongodb-uri",
+    "JWT_SECRET": "@jwt-secret"
+  }
 }

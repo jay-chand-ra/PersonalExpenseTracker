@@ -6,6 +6,7 @@ const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const swaggerDocument = YAML.load('./swagger.yaml');
 const cors = require('cors');
+const util = require('util');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -30,7 +31,7 @@ MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: tr
     db = client.db('finance_tracker');
   })
   .catch(error => {
-    console.error('MongoDB connection error:', error);
+    console.error('MongoDB connection error:', util.inspect(error, { depth: null }));
     // You might want to send a response here if the database connection fails
     // res.status(500).json({ error: 'Database connection failed' });
   });
@@ -85,7 +86,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Add this route before any middleware
 app.get('/test', (req, res) => {
-  res.json({ message: 'Test route is working' });
+  res.json({ message: 'Server is running' });
 });
 
 // Login route
@@ -337,9 +338,10 @@ app.get('/categories', authenticateJWT, (req, res) => {
 
 // Improve error handling
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  console.error('Error:', util.inspect(err, { depth: null }));
+  res.status(500).json({ error: 'Something went wrong!', details: err.message });
 });
+
 // Start the server
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
