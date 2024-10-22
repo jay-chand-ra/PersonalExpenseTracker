@@ -1,70 +1,27 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const sqlite3 = require('sqlite3').verbose();
-// const basicAuth = require('express-basic-auth');
 const jwt = require('jsonwebtoken');
+const { MongoClient, ObjectId } = require('mongodb');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const swaggerDocument = YAML.load('./swagger.yaml');
 
 const app = express();
 const port = process.env.PORT || 3001;
-// Middleware
+
 app.use(bodyParser.json());
 
-// JWT Secret
-const JWT_SECRET = 'your-secret-key'; // In production, use an environment variable
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const MONGODB_URI = process.env.MONGODB_URI || 'your-mongodb-uri';
 
-// Database setup
-const db = new sqlite3.Database('./finance.db', (err) => {
-  if (err) {
-    console.error('Error opening database', err);
-  } else {
-    console.log('Connected to the SQLite database.');
-    db.serialize(() => {
-      db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT
-      )`);
-      db.run(`CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        type TEXT CHECK(type IN ('income', 'expense')),
-        category TEXT,
-        amount REAL,
-        date TEXT,
-        description TEXT,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-      )`);
-      
-      // Check if user_id column exists and add it if it doesn't
-      db.all(`PRAGMA table_info(transactions)`, (err, rows) => {
-        if (err) {
-          console.error('Error checking table info:', err);
-        } else {
-          const userIdColumnExists = rows.some(row => row.name === 'user_id');
-          if (!userIdColumnExists) {
-            db.run(`ALTER TABLE transactions ADD COLUMN user_id INTEGER REFERENCES users(id)`, (err) => {
-              if (err) {
-                console.error('Error adding user_id column:', err);
-              } else {
-                console.log('Added user_id column to transactions table');
-              }
-            });
-          }
-        }
-      });
+let db;
 
-      // Add categories table
-      db.run(`CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE,
-        type TEXT CHECK(type IN ('income', 'expense'))
-      )`);
-    });
-  }
-});
+MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(client => {
+    console.log('Connected to MongoDB');
+    db = client.db('finance_tracker');
+  })
+  .catch(error => console.error('MongoDB connection error:', error));
 
 // Input validation middleware
 const validateTransaction = (req, res, next) => {
@@ -83,7 +40,7 @@ const validateTransaction = (req, res, next) => {
   }
 
   // Check if the category exists and matches the transaction type
-  db.get('SELECT * FROM categories WHERE name = ? AND type = ?', [category, type], (err, row) => {
+  db.collection('categories').findOne({ name: category, type: type }, (err, row) => {
     if (err || !row) {
       return res.status(400).json({ error: 'Invalid category for the transaction type' });
     }
@@ -124,7 +81,7 @@ app.post('/login', (req, res) => {
   console.log('Login route hit');
   const { username, password } = req.body;
 
-  db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
+  db.collection('users').findOne({ username: username }, (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -148,7 +105,7 @@ app.post('/register', (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
+  db.collection('users').findOne({ username: username }, (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -157,12 +114,12 @@ app.post('/register', (req, res) => {
       return res.status(400).json({ error: 'Username already exists' });
     }
 
-    db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, password], function(err) {
+    db.collection('users').insertOne({ username: username, password: password }, (err, result) => {
       if (err) {
         return res.status(500).json({ error: 'Error creating user' });
       }
 
-      res.status(201).json({ message: 'User registered successfully', userId: this.lastID });
+      res.status(201).json({ message: 'User registered successfully', userId: result.insertedId });
     });
   });
 });
@@ -175,16 +132,19 @@ app.post('/transactions', validateTransaction, (req, res) => {
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
 
-  db.run(
-    'INSERT INTO transactions (user_id, type, category, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)',
-    [userId, type, category, amount, date, description],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-      res.status(201).json({ id: this.lastID });
+  db.collection('transactions').insertOne({
+    user_id: userId,
+    type: type,
+    category: category,
+    amount: amount,
+    date: date,
+    description: description
+  }, (err, result) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
     }
-  );
+    res.status(201).json({ id: result.insertedId });
+  });
 });
 
 app.get('/transactions', (req, res) => {
@@ -192,69 +152,64 @@ app.get('/transactions', (req, res) => {
   const offset = (page - 1) * limit;
   const userId = req.user.id;
 
-  db.all(
-    'SELECT * FROM transactions WHERE user_id = ? LIMIT ? OFFSET ?',
-    [userId, limit, offset],
-    (err, rows) => {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-      res.json(rows);
+  db.collection('transactions').find({ user_id: userId }).sort({ date: -1 }).skip(offset * limit).limit(limit).toArray((err, rows) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
     }
-  );
+    res.json(rows);
+  });
 });
 
 app.get('/transactions/:id', (req, res) => {
   const userId = req.user.id;
-  db.get(
-    'SELECT * FROM transactions WHERE id = ? AND user_id = ?',
-    [req.params.id, userId],
-    (err, row) => {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-      if (!row) {
-        return res.status(404).json({ error: 'Transaction not found' });
-      }
-      res.json(row);
+  db.collection('transactions').findOne({ id: ObjectId(req.params.id), user_id: userId }, (err, row) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
     }
-  );
+    if (!row) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    res.json(row);
+  });
 });
 
 app.put('/transactions/:id', validateTransaction, (req, res) => {
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
 
-  db.run(
-    'UPDATE transactions SET type = ?, category = ?, amount = ?, date = ?, description = ? WHERE id = ? AND user_id = ?',
-    [type, category, amount, date, description, req.params.id, userId],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Transaction not found' });
-      }
-      res.json({ message: 'Transaction updated successfully' });
+  db.collection('transactions').updateOne({
+    id: ObjectId(req.params.id),
+    user_id: userId
+  }, {
+    $set: {
+      type: type,
+      category: category,
+      amount: amount,
+      date: date,
+      description: description
     }
-  );
+  }, (err, result) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    res.json({ message: 'Transaction updated successfully' });
+  });
 });
 
 app.delete('/transactions/:id', (req, res) => {
   const userId = req.user.id;
-  db.run(
-    'DELETE FROM transactions WHERE id = ? AND user_id = ?',
-    [req.params.id, userId],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Transaction not found' });
-      }
-      res.json({ message: 'Transaction deleted successfully' });
+  db.collection('transactions').deleteOne({ id: ObjectId(req.params.id), user_id: userId }, (err, result) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
     }
-  );
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    res.json({ message: 'Transaction deleted successfully' });
+  });
 });
 
 app.get('/summary', authenticateJWT, (req, res) => {
@@ -283,7 +238,12 @@ app.get('/summary', authenticateJWT, (req, res) => {
 
   query += ' GROUP BY type, category';
 
-  db.all(query, params, (err, rows) => {
+  db.collection('transactions').aggregate([
+    { $match: { user_id: userId } },
+    { $match: { date: { $gte: startDate, $lte: endDate } } },
+    { $match: { category: category } },
+    { $group: { _id: { type: '$type', category: '$category' }, total: { $sum: '$amount' } } }
+  ]).toArray((err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -293,12 +253,12 @@ app.get('/summary', authenticateJWT, (req, res) => {
       balance: 0
     };
     rows.forEach(row => {
-      if (row.type === 'income') {
+      if (row._id.type === 'income') {
         summary.income.total += row.total;
-        summary.income.categories[row.category] = row.total;
-      } else if (row.type === 'expense') {
+        summary.income.categories[row._id.category] = row.total;
+      } else if (row._id.type === 'expense') {
         summary.expenses.total += row.total;
-        summary.expenses.categories[row.category] = row.total;
+        summary.expenses.categories[row._id.category] = row.total;
       }
     });
     summary.balance = summary.income.total - summary.expenses.total;
@@ -326,7 +286,10 @@ app.get('/reports/monthly-spending', (req, res) => {
     ORDER BY total DESC
   `;
 
-  db.all(query, [userId, startDate, endDate], (err, rows) => {
+  db.collection('transactions').aggregate([
+    { $match: { user_id: userId, type: 'expense', date: { $gte: startDate, $lte: endDate } } },
+    { $group: { _id: '$category', total: { $sum: '$amount' } } }
+  ]).toArray((err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -341,16 +304,16 @@ app.post('/categories', authenticateJWT, (req, res) => {
     return res.status(400).json({ error: 'Invalid category data' });
   }
 
-  db.run('INSERT INTO categories (name, type) VALUES (?, ?)', [name, type], function(err) {
+  db.collection('categories').insertOne({ name: name, type: type }, (err, result) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
-    res.status(201).json({ id: this.lastID, name, type });
+    res.status(201).json({ id: result.insertedId, name: name, type: type });
   });
 });
 
 app.get('/categories', authenticateJWT, (req, res) => {
-  db.all('SELECT * FROM categories', (err, rows) => {
+  db.collection('categories').find().toArray((err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
