@@ -9,7 +9,6 @@ const swaggerDocument = YAML.load('./swagger.yaml');
 
 const app = express();
 const port = process.env.PORT || 3001;
-
 // Middleware
 app.use(bodyParser.json());
 
@@ -364,7 +363,6 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });
-
 // Start the server
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
