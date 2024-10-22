@@ -4,9 +4,17 @@
       {
         "src": "app.js",
         "use": "@vercel/node"
+      },
+      {
+        "src": "swagger.yaml",
+        "use": "@vercel/static"
       }
     ],
     "routes": [
+      {
+        "src": "/swagger.yaml",
+        "dest": "/swagger.yaml"
+      },
       {
         "src": "/(.*)",
         "dest": "/app.js"

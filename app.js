@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { MongoClient, ObjectId } = require('mongodb');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
-const swaggerDocument = YAML.load('./swagger.yaml');
+const path = require('path');
 const cors = require('cors');
 const util = require('util');
 
@@ -346,3 +346,5 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
+
+const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
