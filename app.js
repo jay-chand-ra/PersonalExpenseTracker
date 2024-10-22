@@ -11,8 +11,8 @@ const port = process.env.PORT || 3001;
 
 app.use(bodyParser.json());
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const MONGODB_URI = process.env.MONGODB_URI || 'your-mongodb-uri';
+const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key-why-do-you-want';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jaychandra:1905145073@cluster0.xmyh7.mongodb.net/';
 
 let db;
 
