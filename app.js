@@ -81,7 +81,7 @@ const dbLayer = {
       throw new Error('Database not initialized');
     }
     if (DB_TYPE === 'mongodb') {
-      return await db.collection(collection).findOne(query);
+      return await db.collection(collection).findOne(query, { maxTimeMS: 5000 });
     } else {
       const get = util.promisify(db.get.bind(db));
       const keys = Object.keys(query);
@@ -242,23 +242,33 @@ app.get('/test', (req, res) => {
 });
 
 // Login and Register routes (these should not require authentication)
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   console.log('Login route hit');
   const { username, password } = req.body;
+  console.log(`Attempting login for user: ${username}`);
 
-  dbLayer.findOne('users', { username: username }, (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
+  try {
+    const user = await dbLayer.findOne('users', { username: username });
+    console.log('Database query completed');
+
+    if (!user) {
+      console.log('User not found');
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (!user || user.password !== password) {
+    if (user.password !== password) {
+      console.log('Invalid password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+    console.log('Token generated successfully');
 
     res.json({ token });
-  });
+  } catch (error) {
+    console.error('Error in login route:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
 });
 
 app.post('/register', async (req, res) => {
