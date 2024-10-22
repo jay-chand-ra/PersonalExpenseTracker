@@ -2,11 +2,15 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ObjectId } = require('mongodb');
+const sqlite3 = require('sqlite3').verbose();
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
 const cors = require('cors');
 const util = require('util');
+
+// Load Swagger document
+const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -15,8 +19,6 @@ const port = process.env.PORT || 3001;
 const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
 
 app.use(bodyParser.json());
-
-// Use this CORS configuration
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -26,21 +28,163 @@ app.use(cors({
 // Setup Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key-why-do-you-want';
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jaychandra:1905145073@cluster0.xmyh7.mongodb.net/';
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
+const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/finance_tracker';
+const DB_TYPE = process.env.DB_TYPE || 'mongodb'; // 'mongodb' or 'sqlite'
 
 let db;
 
-MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(client => {
-    console.log('Connected to MongoDB');
-    db = client.db('finance_tracker');
-  })
-  .catch(error => {
-    console.error('MongoDB connection error:', util.inspect(error, { depth: null }));
-    // You might want to send a response here if the database connection fails
-    // res.status(500).json({ error: 'Database connection failed' });
-  });
+// Database abstraction layer
+const dbLayer = {
+  async connect() {
+    if (DB_TYPE === 'mongodb') {
+      const client = await MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+      db = client.db();
+      console.log('Connected to MongoDB');
+    } else {
+      db = new sqlite3.Database('./finance.db', (err) => {
+        if (err) {
+          console.error('Error opening database', err);
+        } else {
+          console.log('Connected to SQLite database');
+          this.initializeSQLite();
+        }
+      });
+    }
+  },
+
+  async initializeSQLite() {
+    const run = util.promisify(db.run.bind(db));
+    await run(`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
+      password TEXT
+    )`);
+    await run(`CREATE TABLE IF NOT EXISTS transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      type TEXT,
+      category TEXT,
+      amount REAL,
+      date TEXT,
+      description TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`);
+    await run(`CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE,
+      type TEXT
+    )`);
+  },
+
+  async findOne(collection, query) {
+    if (DB_TYPE === 'mongodb') {
+      return await db.collection(collection).findOne(query);
+    } else {
+      const get = util.promisify(db.get.bind(db));
+      const keys = Object.keys(query);
+      const values = Object.values(query);
+      const sqlQuery = `SELECT * FROM ${collection} WHERE ${keys.map(k => `${k} = ?`).join(' AND ')}`;
+      return await get(sqlQuery, values);
+    }
+  },
+
+  async insertOne(collection, document) {
+    if (DB_TYPE === 'mongodb') {
+      const result = await db.collection(collection).insertOne(document);
+      return { insertedId: result.insertedId };
+    } else {
+      const run = util.promisify(db.run.bind(db));
+      const keys = Object.keys(document);
+      const values = Object.values(document);
+      const sqlQuery = `INSERT INTO ${collection} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`;
+      const result = await run(sqlQuery, values);
+      return { insertedId: result.lastID };
+    }
+  },
+
+  async find(collection, query, options = {}) {
+    if (DB_TYPE === 'mongodb') {
+      return await db.collection(collection).find(query, options).toArray();
+    } else {
+      const all = util.promisify(db.all.bind(db));
+      const keys = Object.keys(query);
+      const values = Object.values(query);
+      let sqlQuery = `SELECT * FROM ${collection}`;
+      if (keys.length > 0) {
+        sqlQuery += ` WHERE ${keys.map(k => `${k} = ?`).join(' AND ')}`;
+      }
+      if (options.sort) {
+        const sortField = Object.keys(options.sort)[0];
+        const sortOrder = options.sort[sortField] === 1 ? 'ASC' : 'DESC';
+        sqlQuery += ` ORDER BY ${sortField} ${sortOrder}`;
+      }
+      if (options.skip) sqlQuery += ` OFFSET ${options.skip}`;
+      if (options.limit) sqlQuery += ` LIMIT ${options.limit}`;
+      return await all(sqlQuery, values);
+    }
+  },
+
+  async updateOne(collection, query, update) {
+    if (DB_TYPE === 'mongodb') {
+      return await db.collection(collection).updateOne(query, { $set: update });
+    } else {
+      const run = util.promisify(db.run.bind(db));
+      const setKeys = Object.keys(update);
+      const setValues = Object.values(update);
+      const whereKeys = Object.keys(query);
+      const whereValues = Object.values(query);
+      const sqlQuery = `UPDATE ${collection} SET ${setKeys.map(k => `${k} = ?`).join(', ')} WHERE ${whereKeys.map(k => `${k} = ?`).join(' AND ')}`;
+      const result = await run(sqlQuery, [...setValues, ...whereValues]);
+      return { modifiedCount: result.changes };
+    }
+  },
+
+  async deleteOne(collection, query) {
+    if (DB_TYPE === 'mongodb') {
+      return await db.collection(collection).deleteOne(query);
+    } else {
+      const run = util.promisify(db.run.bind(db));
+      const keys = Object.keys(query);
+      const values = Object.values(query);
+      const sqlQuery = `DELETE FROM ${collection} WHERE ${keys.map(k => `${k} = ?`).join(' AND ')}`;
+      const result = await run(sqlQuery, values);
+      return { deletedCount: result.changes };
+    }
+  },
+
+  async aggregate(collection, pipeline) {
+    if (DB_TYPE === 'mongodb') {
+      return await db.collection(collection).aggregate(pipeline).toArray();
+    } else {
+      // Implement SQLite aggregation based on the specific pipeline
+      // This is a simplified version and may need to be adapted for complex aggregations
+      const all = util.promisify(db.all.bind(db));
+      const matchStage = pipeline.find(stage => stage.$match);
+      const groupStage = pipeline.find(stage => stage.$group);
+      
+      let sqlQuery = `SELECT ${Object.keys(groupStage.$group).map(k => k === '_id' ? groupStage.$group[k] : `${groupStage.$group[k].$sum} as ${k}`).join(', ')}
+                      FROM ${collection}`;
+      
+      if (matchStage) {
+        const whereClause = Object.entries(matchStage.$match)
+          .map(([key, value]) => `${key} = ?`)
+          .join(' AND ');
+        sqlQuery += ` WHERE ${whereClause}`;
+      }
+      
+      sqlQuery += ` GROUP BY ${Object.values(groupStage.$group._id).join(', ')}`;
+      
+      const values = matchStage ? Object.values(matchStage.$match) : [];
+      return await all(sqlQuery, values);
+    }
+  }
+};
+
+// Connect to the database
+dbLayer.connect().catch(console.error);
 
 // Input validation middleware
 const validateTransaction = (req, res, next) => {
@@ -59,7 +203,7 @@ const validateTransaction = (req, res, next) => {
   }
 
   // Check if the category exists and matches the transaction type
-  db.collection('categories').findOne({ name: category, type: type }, (err, row) => {
+  dbLayer.findOne('categories', { name: category, type: type }, (err, row) => {
     if (err || !row) {
       return res.status(400).json({ error: 'Invalid category for the transaction type' });
     }
@@ -87,20 +231,22 @@ const authenticateJWT = (req, res, next) => {
   }
 };
 
-// Add this line before the authenticateJWT middleware
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
-
 // Add this route before any middleware
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to the Personal Finance Tracker API' });
+});
+
+// Add the test route here as well
 app.get('/test', (req, res) => {
   res.json({ message: 'Server is running' });
 });
 
-// Login route
+// Login and Register routes (these should not require authentication)
 app.post('/login', (req, res) => {
   console.log('Login route hit');
   const { username, password } = req.body;
 
-  db.collection('users').findOne({ username: username }, (err, user) => {
+  dbLayer.findOne('users', { username: username }, (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -115,8 +261,7 @@ app.post('/login', (req, res) => {
   });
 });
 
-// Registration route
-app.post('/register', (req, res) => {
+app.post('/register', async (req, res) => {
   console.log('Register route hit');
   console.log('Request body:', req.body);
   const { username, password } = req.body;
@@ -126,34 +271,35 @@ app.post('/register', (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  db.collection('users').findOne({ username: username }, (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    if (user) {
+  try {
+    const existingUser = await dbLayer.findOne('users', { username: username });
+    if (existingUser) {
       return res.status(400).json({ error: 'Username already exists' });
     }
 
-    db.collection('users').insertOne({ username: username, password: password }, (err, result) => {
-      if (err) {
-        return res.status(500).json({ error: 'Error creating user' });
-      }
-
-      res.status(201).json({ message: 'User registered successfully', userId: result.insertedId });
-    });
-  });
+    const result = await dbLayer.insertOne('users', { username: username, password: password });
+    res.status(201).json({ message: 'User registered successfully', userId: result.insertedId });
+  } catch (error) {
+    console.error('Error in register route:', error);
+    res.status(500).json({ error: 'Error creating user' });
+  }
 });
 
-// Protected routes
-app.use(authenticateJWT);
+// Swagger UI route (should not require authentication)
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-// Transactions routes
+// Apply authentication middleware only to routes that need it
+app.use('/transactions', authenticateJWT);
+app.use('/categories', authenticateJWT);
+app.use('/summary', authenticateJWT);
+app.use('/reports', authenticateJWT);
+
+// Protected routes
 app.post('/transactions', validateTransaction, (req, res) => {
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
 
-  db.collection('transactions').insertOne({
+  dbLayer.insertOne('transactions', {
     user_id: userId,
     type: type,
     category: category,
@@ -173,7 +319,7 @@ app.get('/transactions', (req, res) => {
   const offset = (page - 1) * limit;
   const userId = req.user.id;
 
-  db.collection('transactions').find({ user_id: userId }).sort({ date: -1 }).skip(offset * limit).limit(limit).toArray((err, rows) => {
+  dbLayer.find('transactions', { user_id: userId }, { sort: { date: -1 }, skip: offset * limit, limit: limit }, (err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -183,7 +329,7 @@ app.get('/transactions', (req, res) => {
 
 app.get('/transactions/:id', (req, res) => {
   const userId = req.user.id;
-  db.collection('transactions').findOne({ id: ObjectId(req.params.id), user_id: userId }, (err, row) => {
+  dbLayer.findOne('transactions', { id: ObjectId(req.params.id), user_id: userId }, (err, row) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -198,7 +344,7 @@ app.put('/transactions/:id', validateTransaction, (req, res) => {
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
 
-  db.collection('transactions').updateOne({
+  dbLayer.updateOne('transactions', {
     id: ObjectId(req.params.id),
     user_id: userId
   }, {
@@ -222,7 +368,7 @@ app.put('/transactions/:id', validateTransaction, (req, res) => {
 
 app.delete('/transactions/:id', (req, res) => {
   const userId = req.user.id;
-  db.collection('transactions').deleteOne({ id: ObjectId(req.params.id), user_id: userId }, (err, result) => {
+  dbLayer.deleteOne('transactions', { id: ObjectId(req.params.id), user_id: userId }, (err, result) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -241,30 +387,18 @@ app.get('/summary', authenticateJWT, (req, res) => {
     return res.status(400).json({ error: 'Invalid date format' });
   }
 
-  let query = 'SELECT type, category, SUM(amount) as total FROM transactions WHERE user_id = ?';
-  const params = [userId];
+  let matchStage = { user_id: userId };
+  if (startDate) matchStage.date = { $gte: startDate };
+  if (endDate) matchStage.date = { ...matchStage.date, $lte: endDate };
+  if (category) matchStage.category = category;
 
-  if (startDate) {
-    query += ' AND date >= ?';
-    params.push(startDate);
-  }
-  if (endDate) {
-    query += ' AND date <= ?';
-    params.push(endDate);
-  }
-  if (category) {
-    query += ' AND category = ?';
-    params.push(category);
-  }
-
-  query += ' GROUP BY type, category';
-
-  db.collection('transactions').aggregate([
-    { $match: { user_id: userId } },
-    { $match: { date: { $gte: startDate, $lte: endDate } } },
-    { $match: { category: category } },
-    { $group: { _id: { type: '$type', category: '$category' }, total: { $sum: '$amount' } } }
-  ]).toArray((err, rows) => {
+  dbLayer.aggregate('transactions', [
+    { $match: matchStage },
+    { $group: { 
+      _id: { type: '$type', category: '$category' }, 
+      total: { $sum: '$amount' } 
+    }}
+  ]).then(rows => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -284,6 +418,9 @@ app.get('/summary', authenticateJWT, (req, res) => {
     });
     summary.balance = summary.income.total - summary.expenses.total;
     res.json(summary);
+  }).catch(err => {
+    console.error('Error in summary route:', err);
+    res.status(500).json({ error: 'Error calculating summary' });
   });
 });
 
@@ -307,10 +444,7 @@ app.get('/reports/monthly-spending', (req, res) => {
     ORDER BY total DESC
   `;
 
-  db.collection('transactions').aggregate([
-    { $match: { user_id: userId, type: 'expense', date: { $gte: startDate, $lte: endDate } } },
-    { $group: { _id: '$category', total: { $sum: '$amount' } } }
-  ]).toArray((err, rows) => {
+  dbLayer.find('transactions', { user_id: userId, type: 'expense', date: { $gte: startDate, $lte: endDate } }, { sort: { category: 1 } }, (err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -325,7 +459,7 @@ app.post('/categories', authenticateJWT, (req, res) => {
     return res.status(400).json({ error: 'Invalid category data' });
   }
 
-  db.collection('categories').insertOne({ name: name, type: type }, (err, result) => {
+  dbLayer.insertOne('categories', { name: name, type: type }, (err, result) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -334,7 +468,7 @@ app.post('/categories', authenticateJWT, (req, res) => {
 });
 
 app.get('/categories', authenticateJWT, (req, res) => {
-  db.collection('categories').find().toArray((err, rows) => {
+  dbLayer.find('categories', {}, { sort: { name: 1 } }, (err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
