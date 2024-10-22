@@ -11,6 +11,9 @@ const util = require('util');
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Load Swagger document
+const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
+
 app.use(bodyParser.json());
 
 // Use this CORS configuration
@@ -19,6 +22,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Setup Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key-why-do-you-want';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jaychandra:1905145073@cluster0.xmyh7.mongodb.net/';
@@ -346,5 +352,3 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
-
-const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
