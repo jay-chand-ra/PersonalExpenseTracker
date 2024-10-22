@@ -15,18 +15,12 @@ const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Load Swagger document
-const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
-
 app.use(bodyParser.json());
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// Setup Swagger UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
