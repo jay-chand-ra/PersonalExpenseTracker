@@ -241,29 +241,17 @@ app.get('/summary', authenticateJWT, (req, res) => {
     return res.status(400).json({ error: 'Invalid date format' });
   }
 
-  let query = 'SELECT type, category, SUM(amount) as total FROM transactions WHERE user_id = ?';
-  const params = [userId];
-
-  if (startDate) {
-    query += ' AND date >= ?';
-    params.push(startDate);
-  }
-  if (endDate) {
-    query += ' AND date <= ?';
-    params.push(endDate);
-  }
-  if (category) {
-    query += ' AND category = ?';
-    params.push(category);
-  }
-
-  query += ' GROUP BY type, category';
+  let matchStage = { user_id: userId };
+  if (startDate) matchStage.date = { $gte: startDate };
+  if (endDate) matchStage.date = { ...matchStage.date, $lte: endDate };
+  if (category) matchStage.category = category;
 
   db.collection('transactions').aggregate([
-    { $match: { user_id: userId } },
-    { $match: { date: { $gte: startDate, $lte: endDate } } },
-    { $match: { category: category } },
-    { $group: { _id: { type: '$type', category: '$category' }, total: { $sum: '$amount' } } } }
+    { $match: matchStage },
+    { $group: { 
+      _id: { type: '$type', category: '$category' }, 
+      total: { $sum: '$amount' } 
+    }}
   ]).toArray((err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
