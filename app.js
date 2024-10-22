@@ -5,11 +5,13 @@ const { MongoClient, ObjectId } = require('mongodb');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const swaggerDocument = YAML.load('./swagger.yaml');
+const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(bodyParser.json());
+app.use(cors());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key-why-do-you-want';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jaychandra:1905145073@cluster0.xmyh7.mongodb.net/';
@@ -21,7 +23,11 @@ MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: tr
     console.log('Connected to MongoDB');
     db = client.db('finance_tracker');
   })
-  .catch(error => console.error('MongoDB connection error:', error));
+  .catch(error => {
+    console.error('MongoDB connection error:', error);
+    // You might want to send a response here if the database connection fails
+    // res.status(500).json({ error: 'Database connection failed' });
+  });
 
 // Input validation middleware
 const validateTransaction = (req, res, next) => {
