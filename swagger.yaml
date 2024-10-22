@@ -1,0 +1,302 @@
+openapi: 3.0.0
+info:
+  title: Personal Finance Tracker API
+  version: 1.0.0
+  description: API for managing personal financial records, including income and expenses.
+
+servers:
+  - url: http://localhost:3001
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        type:
+          type: string
+          enum: [income, expense]
+          example: expense
+        category:
+          type: string
+          example: Groceries
+        amount:
+          type: number
+          format: float
+          example: 50.25
+        date:
+          type: string
+          format: date
+          example: "2023-05-01"
+        description:
+          type: string
+          example: Weekly grocery shopping
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Groceries
+        type:
+          type: string
+          enum: [income, expense]
+          example: expense
+
+security:
+  - BearerAuth: []
+
+paths:
+  /register:
+    post:
+      security: []
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  example: jaychandra
+                password:
+                  type: string
+                  example: hello@123
+      responses:
+        '201':
+          description: User registered successfully
+        '400':
+          description: Invalid input
+
+  /login:
+    post:
+      security: []
+      summary: Login and get JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  example: jaychandra
+                password:
+                  type: string
+                  example: hello@123
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '401':
+          description: Invalid credentials
+
+  /transactions:
+    post:
+      summary: Add a new transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+      responses:
+        '201':
+          description: Transaction created successfully
+        '400':
+          description: Invalid input
+    get:
+      summary: Retrieve all transactions
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            example: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            example: 10
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+
+  /transactions/{id}:
+    get:
+      summary: Retrieve a transaction by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '404':
+          description: Transaction not found
+    put:
+      summary: Update a transaction by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+      responses:
+        '200':
+          description: Transaction updated successfully
+        '400':
+          description: Invalid input
+        '404':
+          description: Transaction not found
+    delete:
+      summary: Delete a transaction by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Transaction deleted successfully
+        '404':
+          description: Transaction not found
+
+  /summary:
+    get:
+      summary: Retrieve a summary of transactions
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+            format: date
+          example: "2023-01-01"
+        - in: query
+          name: endDate
+          schema:
+            type: string
+            format: date
+          example: "2023-12-31"
+        - in: query
+          name: category
+          schema:
+            type: string
+          example: Groceries
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  income:
+                    type: number
+                    example: 5000
+                  expenses:
+                    type: number
+                    example: 3000
+                  balance:
+                    type: number
+                    example: 2000
+
+  /categories:
+    get:
+      summary: Get all categories
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+    post:
+      summary: Create a new category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Category'
+      responses:
+        '201':
+          description: Category created successfully
+        '400':
+          description: Invalid input
+
+  /reports/monthly-spending:
+    get:
+      summary: Get monthly spending report
+      parameters:
+        - in: query
+          name: year
+          required: true
+          schema:
+            type: integer
+          example: 2023
+        - in: query
+          name: month
+          required: true
+          schema:
+            type: integer
+          example: 5
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    category:
+                      type: string
+                      example: Groceries
+                    total:
+                      type: number
+                      example: 250.75
