@@ -186,6 +186,10 @@ const dbLayer = {
 // Connect to the database
 dbLayer.connect().catch(console.error);
 
+// Add this after your database connection is established
+db.collection('transactions').createIndex({ user_id: 1, date: -1 });
+db.collection('users').createIndex({ username: 1 }, { unique: true });
+
 // Input validation middleware
 const validateTransaction = (req, res, next) => {
   const { type, category, amount, date } = req.body;
@@ -305,23 +309,26 @@ app.use('/summary', authenticateJWT);
 app.use('/reports', authenticateJWT);
 
 // Protected routes
-app.post('/transactions', validateTransaction, (req, res) => {
+app.post('/transactions', authenticateJWT, validateTransaction, async (req, res) => {
+  console.log('Transaction creation started');
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
 
-  dbLayer.insertOne('transactions', {
-    user_id: userId,
-    type: type,
-    category: category,
-    amount: amount,
-    date: date,
-    description: description
-  }, (err, result) => {
-    if (err) {
-      return res.status(400).json({ error: err.message });
-    }
+  try {
+    const result = await dbLayer.insertOne('transactions', {
+      user_id: userId,
+      type: type,
+      category: category,
+      amount: amount,
+      date: date,
+      description: description
+    });
+    console.log('Transaction inserted');
     res.status(201).json({ id: result.insertedId });
-  });
+  } catch (error) {
+    console.error('Error creating transaction:', error);
+    res.status(500).json({ error: 'Error creating transaction' });
+  }
 });
 
 app.get('/transactions', (req, res) => {
@@ -503,3 +510,6 @@ dbLayer.connect()
     console.error('Failed to connect to the database:', error);
     process.exit(1);
   });
+// Add this after your database connection is established
+db.collection('transactions').createIndex({ user_id: 1, date: -1 });
+db.collection('users').createIndex({ username: 1 }, { unique: true });
