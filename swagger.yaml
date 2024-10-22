@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: API for managing personal financial records, including income and expenses.
 servers:
-  - url: https://your-vercel-app-name.vercel.app
+  - url: https://expensetracker-sable.vercel.app
     description: Production server
   - url: http://localhost:3001
     description: Local development server
