@@ -34,21 +34,38 @@ let db;
 const dbLayer = {
   async connect() {
     if (DB_TYPE === 'mongodb') {
-      const client = await MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+      const client = await MongoClient.connect(MONGODB_URI, { 
+        useNewUrlParser: true, 
+        useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      });
       db = client.db();
       console.log('Connected to MongoDB');
+      
+      // Create indexes after connection is established
+      await this.createIndexes();
     } else {
       return new Promise((resolve, reject) => {
-        db = new sqlite3.Database('./finance.db', (err) => {
+        db = new sqlite3.Database('./finance.db', async (err) => {
           if (err) {
             console.error('Error opening database', err);
             reject(err);
           } else {
             console.log('Connected to SQLite database');
-            this.initializeSQLite().then(resolve).catch(reject);
+            await this.initializeSQLite();
+            resolve();
           }
         });
       });
+    }
+  },
+
+  async createIndexes() {
+    if (DB_TYPE === 'mongodb') {
+      await db.collection('transactions').createIndex({ user_id: 1, date: -1 });
+      await db.collection('users').createIndex({ username: 1 }, { unique: true });
+      console.log('Indexes created successfully');
     }
   },
 
@@ -182,13 +199,6 @@ const dbLayer = {
     }
   }
 };
-
-// Connect to the database
-dbLayer.connect().catch(console.error);
-
-// Add this after your database connection is established
-db.collection('transactions').createIndex({ user_id: 1, date: -1 });
-db.collection('users').createIndex({ username: 1 }, { unique: true });
 
 // Input validation middleware
 const validateTransaction = (req, res, next) => {
@@ -499,7 +509,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!', details: err.message });
 });
 
-// Replace the existing server startup code at the end of the file with this:
+// Connect to the database and start the server
 dbLayer.connect()
   .then(() => {
     app.listen(port, () => {
@@ -510,6 +520,3 @@ dbLayer.connect()
     console.error('Failed to connect to the database:', error);
     process.exit(1);
   });
-// Add this after your database connection is established
-db.collection('transactions').createIndex({ user_id: 1, date: -1 });
-db.collection('users').createIndex({ username: 1 }, { unique: true });
