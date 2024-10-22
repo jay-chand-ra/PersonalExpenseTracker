@@ -269,6 +269,7 @@ paths:
         '400':
           description: Invalid input
 
+          
   /reports/monthly-spending:
     get:
       summary: Get monthly spending report
