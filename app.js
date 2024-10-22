@@ -38,13 +38,16 @@ const dbLayer = {
       db = client.db();
       console.log('Connected to MongoDB');
     } else {
-      db = new sqlite3.Database('./finance.db', (err) => {
-        if (err) {
-          console.error('Error opening database', err);
-        } else {
-          console.log('Connected to SQLite database');
-          this.initializeSQLite();
-        }
+      return new Promise((resolve, reject) => {
+        db = new sqlite3.Database('./finance.db', (err) => {
+          if (err) {
+            console.error('Error opening database', err);
+            reject(err);
+          } else {
+            console.log('Connected to SQLite database');
+            this.initializeSQLite().then(resolve).catch(reject);
+          }
+        });
       });
     }
   },
@@ -74,6 +77,9 @@ const dbLayer = {
   },
 
   async findOne(collection, query) {
+    if (!db) {
+      throw new Error('Database not initialized');
+    }
     if (DB_TYPE === 'mongodb') {
       return await db.collection(collection).findOne(query);
     } else {
@@ -275,7 +281,7 @@ app.post('/register', async (req, res) => {
     res.status(201).json({ message: 'User registered successfully', userId: result.insertedId });
   } catch (error) {
     console.error('Error in register route:', error);
-    res.status(500).json({ error: 'Error creating user' });
+    res.status(500).json({ error: 'Error creating user', details: error.message });
   }
 });
 
@@ -476,7 +482,14 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!', details: err.message });
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+// Replace the existing server startup code at the end of the file with this:
+dbLayer.connect()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`Server is running on port ${port}`);
+    });
+  })
+  .catch(error => {
+    console.error('Failed to connect to the database:', error);
+    process.exit(1);
+  });
