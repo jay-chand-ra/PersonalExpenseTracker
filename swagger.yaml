@@ -5,7 +5,7 @@ info:
   description: API for managing personal financial records, including income and expenses.
 servers:
   - url: https://expensetracker-sable.vercel.app
-    description: Production server
+    description: Expense Tracker Server
   - url: http://localhost:3001
     description: Local development server
 components:
