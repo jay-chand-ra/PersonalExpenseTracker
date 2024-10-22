@@ -225,15 +225,17 @@ const authenticateJWT = (req, res, next) => {
   }
 };
 
-// Add this line before the authenticateJWT middleware
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
-
 // Add this route before any middleware
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to the Personal Finance Tracker API' });
+});
+
+// Add the test route here as well
 app.get('/test', (req, res) => {
   res.json({ message: 'Server is running' });
 });
 
-// Login route
+// Login and Register routes (these should not require authentication)
 app.post('/login', (req, res) => {
   console.log('Login route hit');
   const { username, password } = req.body;
@@ -253,7 +255,6 @@ app.post('/login', (req, res) => {
   });
 });
 
-// Registration route
 app.post('/register', async (req, res) => {
   console.log('Register route hit');
   console.log('Request body:', req.body);
@@ -278,10 +279,16 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Protected routes
-app.use(authenticateJWT);
+// Swagger UI route (should not require authentication)
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-// Transactions routes
+// Apply authentication middleware only to routes that need it
+app.use('/transactions', authenticateJWT);
+app.use('/categories', authenticateJWT);
+app.use('/summary', authenticateJWT);
+app.use('/reports', authenticateJWT);
+
+// Protected routes
 app.post('/transactions', validateTransaction, (req, res) => {
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
