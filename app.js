@@ -8,6 +8,7 @@ const YAML = require('yamljs');
 const path = require('path');
 const cors = require('cors');
 const util = require('util');
+const NodeCache = require('node-cache');
 
 // Load Swagger document
 const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
@@ -29,6 +30,22 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/financ
 const DB_TYPE = process.env.DB_TYPE || 'mongodb'; // 'mongodb' or 'sqlite'
 
 let db;
+
+// Initialize cache
+const cache = new NodeCache({ stdTTL: 300 }); // Cache for 5 minutes
+
+// Use connection pooling
+let client;
+const connectToDatabase = async () => {
+  if (!client) {
+    client = await MongoClient.connect(MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      poolSize: 10, // Adjust based on your needs
+    });
+  }
+  return client.db();
+};
 
 // Database abstraction layer
 const dbLayer = {
@@ -260,29 +277,20 @@ app.get('/test', (req, res) => {
 app.post('/login', async (req, res) => {
   console.log('Login route hit');
   const { username, password } = req.body;
-  console.log(`Attempting login for user: ${username}`);
 
   try {
-    const user = await dbLayer.findOne('users', { username: username });
-    console.log('Database query completed');
+    const db = await connectToDatabase();
+    const user = await db.collection('users').findOne({ username }, { projection: { password: 1 } });
 
-    if (!user) {
-      console.log('User not found');
+    if (!user || user.password !== password) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (user.password !== password) {
-      console.log('Invalid password');
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
-    console.log('Token generated successfully');
-
+    const token = jwt.sign({ id: user._id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (error) {
     console.error('Error in login route:', error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -321,39 +329,45 @@ app.use('/reports', authenticateJWT);
 
 // Protected routes
 app.post('/transactions', authenticateJWT, validateTransaction, async (req, res) => {
-  console.log('Transaction creation started');
   const { type, category, amount, date, description } = req.body;
   const userId = req.user.id;
 
   try {
-    console.log('Inserting transaction into database');
-    const result = await dbLayer.insertOne('transactions', {
+    const db = await connectToDatabase();
+    const result = await db.collection('transactions').insertOne({
       user_id: userId,
-      type: type,
-      category: category,
-      amount: amount,
-      date: date,
-      description: description
+      type,
+      category,
+      amount,
+      date,
+      description
     });
-    console.log('Transaction inserted successfully');
     res.status(201).json({ id: result.insertedId });
   } catch (error) {
     console.error('Error creating transaction:', error);
-    res.status(500).json({ error: 'Error creating transaction', details: error.message });
+    res.status(500).json({ error: 'Error creating transaction' });
   }
 });
 
-app.get('/transactions', (req, res) => {
+app.get('/transactions', authenticateJWT, async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
-  const offset = (page - 1) * limit;
   const userId = req.user.id;
 
-  dbLayer.find('transactions', { user_id: userId }, { sort: { date: -1 }, skip: offset * limit, limit: limit }, (err, rows) => {
-    if (err) {
-      return res.status(400).json({ error: err.message });
-    }
-    res.json(rows);
-  });
+  try {
+    const db = await connectToDatabase();
+    const skip = (page - 1) * limit;
+    const transactions = await db.collection('transactions')
+      .find({ user_id: userId })
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .toArray();
+
+    res.json(transactions);
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+    res.status(500).json({ error: 'Error fetching transactions' });
+  }
 });
 
 app.get('/transactions/:id', (req, res) => {
@@ -408,49 +422,60 @@ app.delete('/transactions/:id', (req, res) => {
   });
 });
 
-app.get('/summary', authenticateJWT, (req, res) => {
+app.get('/summary', authenticateJWT, async (req, res) => {
   const { startDate, endDate, category } = req.query;
   const userId = req.user.id;
 
-  if ((startDate && isNaN(Date.parse(startDate))) || (endDate && isNaN(Date.parse(endDate)))) {
-    return res.status(400).json({ error: 'Invalid date format' });
+  const cacheKey = `summary_${userId}_${startDate}_${endDate}_${category}`;
+  const cachedSummary = cache.get(cacheKey);
+  if (cachedSummary) {
+    return res.json(cachedSummary);
   }
 
-  let matchStage = { user_id: userId };
-  if (startDate) matchStage.date = { $gte: startDate };
-  if (endDate) matchStage.date = { ...matchStage.date, $lte: endDate };
-  if (category) matchStage.category = category;
+  try {
+    const db = await connectToDatabase();
+    const matchStage = { user_id: userId };
+    if (startDate) matchStage.date = { $gte: startDate };
+    if (endDate) matchStage.date = { ...matchStage.date, $lte: endDate };
+    if (category) matchStage.category = category;
 
-  dbLayer.aggregate('transactions', [
-    { $match: matchStage },
-    { $group: { 
-      _id: { type: '$type', category: '$category' }, 
-      total: { $sum: '$amount' } 
-    }}
-  ]).then(rows => {
-    if (err) {
-      return res.status(400).json({ error: err.message });
-    }
-    const summary = {
+    const summary = await db.collection('transactions').aggregate([
+      { $match: matchStage },
+      { $group: { 
+        _id: { type: '$type', category: '$category' }, 
+        total: { $sum: '$amount' } 
+      }},
+      { $group: {
+        _id: '$_id.type',
+        total: { $sum: '$total' },
+        categories: { $push: { k: '$_id.category', v: '$total' } }
+      }},
+      { $project: {
+        _id: 0,
+        type: '$_id',
+        total: 1,
+        categories: { $arrayToObject: '$categories' }
+      }}
+    ]).toArray();
+
+    const result = {
       income: { total: 0, categories: {} },
       expenses: { total: 0, categories: {} },
       balance: 0
     };
-    rows.forEach(row => {
-      if (row._id.type === 'income') {
-        summary.income.total += row.total;
-        summary.income.categories[row._id.category] = row.total;
-      } else if (row._id.type === 'expense') {
-        summary.expenses.total += row.total;
-        summary.expenses.categories[row._id.category] = row.total;
-      }
+
+    summary.forEach(item => {
+      result[item.type] = item;
     });
-    summary.balance = summary.income.total - summary.expenses.total;
-    res.json(summary);
-  }).catch(err => {
-    console.error('Error in summary route:', err);
+
+    result.balance = (result.income.total || 0) - (result.expenses.total || 0);
+
+    cache.set(cacheKey, result);
+    res.json(result);
+  } catch (error) {
+    console.error('Error calculating summary:', error);
     res.status(500).json({ error: 'Error calculating summary' });
-  });
+  }
 });
 
 // New endpoint for generating monthly spending by category report
