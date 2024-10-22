@@ -8,6 +8,9 @@ const path = require('path');
 const cors = require('cors');
 const util = require('util');
 
+// Load Swagger document
+const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
+
 const app = express();
 const port = process.env.PORT || 3001;
 
@@ -19,6 +22,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Setup Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key-why-do-you-want';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jaychandra:1905145073@cluster0.xmyh7.mongodb.net/';
@@ -257,7 +263,7 @@ app.get('/summary', authenticateJWT, (req, res) => {
     { $match: { user_id: userId } },
     { $match: { date: { $gte: startDate, $lte: endDate } } },
     { $match: { category: category } },
-    { $group: { _id: { type: '$type', category: '$category' }, total: { $sum: '$amount' } } }
+    { $group: { _id: { type: '$type', category: '$category' }, total: { $sum: '$amount' } } } }
   ]).toArray((err, rows) => {
     if (err) {
       return res.status(400).json({ error: err.message });
@@ -346,5 +352,3 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
-
-const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
