@@ -11,7 +11,13 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(bodyParser.json());
-app.use(cors());
+
+// Use this CORS configuration
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'my-secret-key-why-do-you-want';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jaychandra:1905145073@cluster0.xmyh7.mongodb.net/';
@@ -105,9 +111,11 @@ app.post('/login', (req, res) => {
 // Registration route
 app.post('/register', (req, res) => {
   console.log('Register route hit');
+  console.log('Request body:', req.body);
   const { username, password } = req.body;
 
   if (!username || !password) {
+    console.log('Missing username or password');
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
