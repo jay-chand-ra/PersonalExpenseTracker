@@ -26,12 +26,18 @@ const createUsers = async (count) => {
     const username = faker.internet.userName();
     const password = faker.internet.password();
     try {
+      console.log(`Attempting to register user: ${username}`);
       await axios.post(`${BASE_URL}/register`, { username, password });
+      console.log(`Attempting to login user: ${username}`);
       const loginResponse = await axios.post(`${BASE_URL}/login`, { username, password });
       users.push({ username, password, token: loginResponse.data.token });
       console.log(`Created user: ${username}`);
     } catch (error) {
-      console.error(`Error creating user ${username}:`, error.response ? error.response.data : error.message);
+      console.error(`Error creating user ${username}:`, error.message);
+      if (error.response) {
+        console.error('Response data:', error.response.data);
+        console.error('Response status:', error.response.status);
+      }
     }
   }
   return users;
@@ -86,13 +92,16 @@ const createTransactions = async (user, count) => {
 const populateDatabase = async () => {
   try {
     const users = await createUsers(5);
+    if (users.length === 0) {
+      throw new Error('No users were created. Cannot proceed with populating the database.');
+    }
     await createCategories(users[0].token);
     for (const user of users) {
       await createTransactions(user, 20);
     }
     console.log('Database population completed successfully!');
   } catch (error) {
-    console.error('Error populating database:', error);
+    console.error('Error populating database:', error.message);
   }
 };
 
