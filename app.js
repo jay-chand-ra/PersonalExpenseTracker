@@ -41,7 +41,9 @@ const connectToDatabase = async () => {
     client = await MongoClient.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      poolSize: 10, // Adjust based on your needs
+      // Remove the poolSize option
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
     });
   }
   return client.db();
@@ -57,6 +59,7 @@ const dbLayer = {
         useUnifiedTopology: true,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 30000,
+        // Remove the poolSize option
       });
       db = client.db();
       console.log('Connected to MongoDB successfully');
