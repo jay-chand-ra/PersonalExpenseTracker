@@ -34,14 +34,15 @@ let db;
 const dbLayer = {
   async connect() {
     if (DB_TYPE === 'mongodb') {
+      console.log('Attempting to connect to MongoDB');
       const client = await MongoClient.connect(MONGODB_URI, { 
         useNewUrlParser: true, 
         useUnifiedTopology: true,
         serverSelectionTimeoutMS: 5000,
-        socketTimeoutMS: 45000,
+        socketTimeoutMS: 30000,
       });
       db = client.db();
-      console.log('Connected to MongoDB');
+      console.log('Connected to MongoDB successfully');
       
       // Create indexes after connection is established
       await this.createIndexes();
@@ -110,7 +111,7 @@ const dbLayer = {
 
   async insertOne(collection, document) {
     if (DB_TYPE === 'mongodb') {
-      const result = await db.collection(collection).insertOne(document);
+      const result = await db.collection(collection).insertOne(document, { maxTimeMS: 5000 });
       return { insertedId: result.insertedId };
     } else {
       const run = util.promisify(db.run.bind(db));
@@ -325,6 +326,7 @@ app.post('/transactions', authenticateJWT, validateTransaction, async (req, res)
   const userId = req.user.id;
 
   try {
+    console.log('Inserting transaction into database');
     const result = await dbLayer.insertOne('transactions', {
       user_id: userId,
       type: type,
@@ -333,11 +335,11 @@ app.post('/transactions', authenticateJWT, validateTransaction, async (req, res)
       date: date,
       description: description
     });
-    console.log('Transaction inserted');
+    console.log('Transaction inserted successfully');
     res.status(201).json({ id: result.insertedId });
   } catch (error) {
     console.error('Error creating transaction:', error);
-    res.status(500).json({ error: 'Error creating transaction' });
+    res.status(500).json({ error: 'Error creating transaction', details: error.message });
   }
 });
 
@@ -520,3 +522,8 @@ dbLayer.connect()
     console.error('Failed to connect to the database:', error);
     process.exit(1);
   });
+
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
